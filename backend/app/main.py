@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import appointments, settings as hospital_settings, whatsapp, auth, clinic, patients, public, tenants, users
+from app.api.v1 import appointments, site, settings as hospital_settings, whatsapp, auth, clinic, patients, public, tenants, users
 from app.core.config import settings
 
 app = FastAPI(title="Hospital Appointment System", version="0.1.0")
@@ -13,6 +13,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin], all
 for r in (auth, tenants, users, clinic, patients, appointments, whatsapp, public, hospital_settings):
     app.include_router(r.router, prefix="/api/v1")
 app.include_router(whatsapp.hook, prefix="/api/v1")
+app.include_router(site.router)  # public hospital card + logo (no login)
 
 
 @app.get("/health")

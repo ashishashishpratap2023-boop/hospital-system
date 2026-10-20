@@ -55,10 +55,10 @@ const TABS={super_admin:[['hospitals','Hospitals']],hospital_admin:[['appts','Ap
 function render(){
   if(!me){$('#app').innerHTML=`<div class="card login"><h3>Hospital Appointments – Sign in</h3><form data-f="login" class="grid" style="grid-template-columns:1fr">${inp('email','Email','email')}${inp('password','Password','password')}<button>Sign in</button></form></div>`;return}
   const t=TABS[me.role];if(!t.some(x=>x[0]===tab))tab=t[0][0];
-  $('#app').innerHTML=`<header><b>Hospital Appointments</b><span>${E(me.full_name)} · ${ROLE[me.role]}</span><button class="s" data-a="logout">Sign out</button></header>
+  $('#app').innerHTML=`<header><span id="hlogo"></span><b>Hospital Appointments</b><span>${E(me.full_name)} · ${ROLE[me.role]}</span><button class="s" data-a="logout">Sign out</button></header>
   <nav>${t.map(x=>`<button data-a="tab" data-t="${x[0]}" class="${x[0]===tab?'on':''}">${x[1]}</button>`).join('')}</nav><main id="main">Loading…</main>`;
   load()}
-async function load(){try{if(!cfg&&me.role!=='super_admin')cfg=await api('/settings').catch(()=>({social:{}}));$('#main').innerHTML=await V[tab]();after()}catch(e){$('#main').innerHTML=`<div class="card">${E(e.message)}</div>`}}
+async function load(){try{if(!cfg&&me.role!=='super_admin')cfg=await api('/settings').catch(()=>({social:{}}));const hl=$('#hlogo');if(hl&&cfg?.has_logo)hl.innerHTML=`<img src="/logo/${E(cfg.slug)}?v=${Date.now()}" alt="" style="height:32px;width:32px;object-fit:contain;border-radius:50%;background:#fff;display:block">`;$('#main').innerHTML=await V[tab]();after()}catch(e){$('#main').innerHTML=`<div class="card">${E(e.message)}</div>`}}
 
 const V={
 async hospitals(){const t=await api('/tenants');
@@ -101,7 +101,13 @@ async doctors(){const [d,dep,u]=await Promise.all([api('/doctors'),api('/departm
   <div class="card"><h3>Doctors</h3>${table(['Name','Department','Specialization','Fee','Days','Hours','Slot',''],d.map(x=>`<tr><td>${E(x.name)}</td><td>${E(dn[x.department_id])}</td><td>${E(x.specialization)}</td><td>${x.consultation_fee}</td><td>${(x.availability.days||[]).map(i=>dl[i]).join(' ')}</td><td>${E(x.availability.start)}–${E(x.availability.end)}</td><td>${x.slot_minutes}m</td><td><button class="d" data-a="ddoc" data-id="${x.id}">Deactivate</button></td></tr>`))}</div>`},
 
 async set(){const c=await api('/settings');cfg=c;const ro=me.role!=='hospital_admin';const f=(n,l,v,t='text')=>`<label>${l}<input name="${n}" type="${t}" value="${E(v)}" ${ro?'disabled':''}></label>`;
-  return `<div class="card"><h3>Hospital details and social media</h3><p class="mut">These are added to the WhatsApp message sent to each patient.</p>
+  const link=location.origin+'/h/'+c.slug;
+  return `<div class="card"><h3>Hospital logo and patient page</h3>
+  <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">${c.has_logo?`<img src="/logo/${E(c.slug)}?v=${Date.now()}" alt="Logo" style="width:72px;height:72px;object-fit:contain;border:1px solid var(--b);border-radius:50%;background:#fff">`:'<span class="mut">No logo yet</span>'}
+  ${ro?'':`<form data-f="logo" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="file" name="file" accept="image/png,image/jpeg,image/webp" required style="width:auto"><button>Upload logo</button>${c.has_logo?'<button type="button" class="d" data-a="logodel">Remove</button>':''}</form>`}</div>
+  <p class="mut">Patients get this page link in the WhatsApp message. It shows your logo and big buttons to follow Instagram, Facebook, YouTube and to review you on Google.</p>
+  <p><a href="${E(link)}" target="_blank">${E(link)}</a> <button class="s" data-a="copy" data-v="${E(link)}">Copy link</button></p></div>
+  <div class="card"><h3>Hospital details and social media</h3><p class="mut">These appear on your patient page. Google review link: in Google Business Profile, choose Get more reviews and copy the link.</p>
   <form data-f="saveSet" class="grid">${f('phone','Hospital phone',c.phone)}${f('email','Hospital email',c.email)}${f('address','Address',c.address)}${f('maps_url','Google Maps link',c.maps_url,'url')}${f('website','Website',c.website,'url')}
   ${f('facebook','Facebook page link',c.social.facebook,'url')}${f('instagram','Instagram link',c.social.instagram,'url')}${f('youtube','YouTube link',c.social.youtube,'url')}${f('twitter','X (Twitter) link',c.social.twitter,'url')}${f('google_reviews','Google review link',c.social.google_reviews,'url')}
   <label>Extra line in message (optional)<textarea name="wa_note" rows="2" ${ro?'disabled':''}>${E(c.wa_note)}</textarea></label>${ro?'':'<button>Save</button>'}</form></div>
@@ -123,18 +129,20 @@ let pt;function after(){
     try{const r=await api(`/appointments/slots?doctor_id=${ds.value}&date=${bd.value}`);s.innerHTML=r.slots.length?opts(r.slots.map(x=>({v:x})),'v','v','Select time'):'<option value="">No free slots</option>'}catch(e){toast(e.message,1)}}}
 
 const rs=(l,v)=>v?`\n${l}: ${v}`:'';
-function waText(a){const c=cfg||{social:{}},s=c.social||{},hn=c.name||'Hospital',when=String(a.start_local||'').split(' ');
-  let m=`Namaste ${a.patient_name},\n`;
-  m+=a.status==='cancelled'?`Aapki appointment cancel kar di gayi hai.\n`:a.status==='completed'?`Hamare yahan aane ke liye dhanyavad. Aap jaldi swasth hon.\n`:`Aapki appointment confirm ho gayi hai.\n`;
-  m+=`\n*${hn}*\nDoctor: ${a.doctor_name}\nDate: ${when[0]||''}\nTime: ${when[1]||''}\nAppointment No: ${a.appointment_number}`;
-  if(a.fee!=null&&a.status!=='cancelled')m+=`\nFee: Rs ${a.fee}`;
-  m+=rs('Address',c.address)+rs('Map',c.maps_url)+rs('Phone',c.phone);
-  if(c.wa_note)m+=`\n\n${c.wa_note}`;
-  const soc=[['Website',c.website],['Facebook',s.facebook],['Instagram',s.instagram],['YouTube',s.youtube],['X',s.twitter],['Google review',s.google_reviews]].filter(x=>x[1]);
-  if(soc.length)m+=`\n\nHumse jude rahiye:`+soc.map(x=>`\n${x[0]}: ${x[1]}`).join('');
+function waText(a){const c=cfg||{},hn=c.name||'Hospital',w=String(a.start_local||'').split(' ');
+  const st=a.status==='cancelled'?'❌ Aapki appointment cancel kar di gayi hai.':a.status==='completed'?'💚 Hamare yahan aane ke liye dhanyavad. Aap jaldi swasth hon.':'✅ Aapki appointment confirm ho gayi hai.';
+  let m=`🏥 *${hn}*\n━━━━━━━━━━━━━━\nNamaste *${a.patient_name}* 🙏\n${st}\n`;
+  if(a.status!=='cancelled'&&a.status!=='completed'){m+=`\n👨‍⚕️ Doctor: *${a.doctor_name}*\n📅 Date: *${w[0]||''}*\n⏰ Time: *${w[1]||''}*\n🎫 Appointment No: *${a.appointment_number}*`;
+    if(a.fee!=null)m+=`\n💰 Fee: Rs ${a.fee}`;m+='\n'}
+  if(c.address)m+=`\n📍 ${c.address}`;if(c.maps_url)m+=`\n🗺️ ${c.maps_url}`;if(c.phone)m+=`\n📞 ${c.phone}`;
+  if(c.wa_note)m+=`\n\n📝 ${c.wa_note}`;
+  if(c.slug)m+=`\n\n✨ *Hamein follow karein* (Instagram, Facebook, YouTube) aur *Google par review dein* ⭐\n👇\n${location.origin}/h/${c.slug}`;
   return m}
 function waUrl(a){return `https://wa.me/${String(a.patient_mobile||'').replace(/\D/g,'')}?text=${encodeURIComponent(waText(a))}`}
 
+function shrink(file){return new Promise((res,rej)=>{const i=new Image(),u=URL.createObjectURL(file);i.onload=()=>{const k=Math.min(1,512/Math.max(i.width,i.height)),c=document.createElement('canvas');
+  c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);c.getContext('2d').drawImage(i,0,0,c.width,c.height);URL.revokeObjectURL(u);
+  let d=c.toDataURL('image/png');if(d.length>380000)d=c.toDataURL('image/jpeg',.85);res(d)};i.onerror=()=>rej(new Error('Could not read this image'));i.src=u})}
 const H={
 async login(o){me=await api('/auth/login','POST',o);tab=null;cfg=null;render()},
 async newTenant(o,f){await api('/tenants','POST',o);toast('Hospital created');load()},
@@ -142,6 +150,8 @@ async filter(o){fl.from=o.from;fl.to=o.to;fl.st=o.st;fl.doc=o.doc||'';load()},
 async book(o,f,w){const r=await api('/appointments','POST',{patient_id:+o.patient_id,doctor_id:+o.doctor_id,date:o.date,time:o.time,reason:o.reason,send_whatsapp:false});
   toast('Appointment booked');if(w){if(r.patient_mobile)w.location.href=waUrl(r);else{w.close();toast('Booked, but this patient has no mobile number',1)}}load()},
 async saveSet(o,f){const b={};for(const [k,v] of new FormData(f))b[k]=v;cfg=await api('/settings','PUT',b);toast('Saved')},
+async logo(o,f){const file=f.querySelector('input[type=file]').files[0];if(!file)return;
+  cfg=await api('/settings/logo','PUT',{image:await shrink(file)});toast('Logo saved');load()},
 async newPatient(o,f){const p=await api('/patients','POST',o);toast('Saved as '+p.patient_code);load()},
 async psearch(o){fl.pq=o.q||'';load()},
 async newDept(o){await api('/departments','POST',o);toast('Department added');load()},
@@ -164,6 +174,8 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]')
     else if(a==='resch'){const d=prompt('New date (YYYY-MM-DD)');if(!d)return;const t=prompt('New time (HH:MM, 24-hour)');if(!t)return;
       await api(`/appointments/${id}/reschedule`,'POST',{date:d,time:t});toast('Rescheduled');load()}
     else if(a==='wamsg'){const r=window._rows[id];if(!r.patient_mobile)return toast('No mobile number for this patient',1);window.open(waUrl(r),'_blank')}
+    else if(a==='logodel'){if(!confirm('Remove the logo?'))return;cfg=await api('/settings/logo','DELETE');toast('Logo removed');load()}
+    else if(a==='copy'){await navigator.clipboard.writeText(b.dataset.v);toast('Link copied')}
     else if(a==='ddoc'){if(!confirm('Deactivate this doctor?'))return;await api(`/doctors/${id}/deactivate`,'POST');load()}
   }catch(x){toast(x.message,1)}});
 api('/auth/me').then(u=>{me=u}).catch(()=>{}).finally(render);
