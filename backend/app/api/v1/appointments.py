@@ -114,7 +114,7 @@ def present(a: Appointment, patient_name, doctor_name, tz):
 def row_out(db, a, tz):
     p = db.get(Patient, a.patient_id)
     d = db.get(Doctor, a.doctor_id)
-    return present(a, p.full_name, d.name, tz)
+    return {**present(a, p.full_name, d.name, tz), "patient_mobile": p.mobile}
 
 
 @router.get("/slots")
