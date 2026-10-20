@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import appointments, whatsapp, auth, clinic, patients, public, tenants, users
@@ -15,3 +18,7 @@ app.include_router(whatsapp.hook, prefix="/api/v1")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# Web app (same origin as the API, so login cookies just work). Must stay LAST so it never shadows API routes.
+app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="web")

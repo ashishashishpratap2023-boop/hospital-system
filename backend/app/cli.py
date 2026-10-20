@@ -21,6 +21,18 @@ def main():
             db.add(User(email=email, full_name="Super Admin", role="super_admin", password_hash=hash_password(pw)))
             db.commit()
         print("Super admin created")
+    elif cmd == "bootstrap":  # non-interactive, idempotent: tables + super admin from env (used on Render free tier)
+        from app.core.config import settings
+        Base.metadata.create_all(engine)
+        if settings.admin_email and len(settings.admin_password) >= 12:
+            with SessionLocal() as db:
+                email = settings.admin_email.strip().lower()
+                if not db.query(User).filter(User.email == email).first():
+                    db.add(User(email=email, full_name="Super Admin", role="super_admin",
+                                password_hash=hash_password(settings.admin_password)))
+                    db.commit()
+                    print("Super admin created")
+        print("Bootstrap done")
     elif cmd == "run-worker":  # delivers queued/retrying WhatsApp messages
         import time
         from app.services.whatsapp import process_due

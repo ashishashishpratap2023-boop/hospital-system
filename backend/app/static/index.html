@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hospital Appointments</title>
+<style>
+:root{--p:#0f766e;--bg:#f4f7f6;--c:#fff;--t:#1f2937;--m:#6b7280;--b:#e5e7eb;--r:#b91c1c}
+@media(prefers-color-scheme:dark){:root{--bg:#111827;--c:#1f2937;--t:#f3f4f6;--m:#9ca3af;--b:#374151;--r:#f87171}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+header{background:var(--p);color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header b{font-size:17px;flex:1}header span{font-size:13px;opacity:.9}
+nav{display:flex;gap:4px;padding:8px 16px;overflow-x:auto;background:var(--c);border-bottom:1px solid var(--b)}
+nav button{background:none;color:var(--t);border:0;padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit}
+nav button.on{background:var(--p);color:#fff}
+main{max-width:1100px;margin:16px auto;padding:0 12px}
+.card{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:14px;margin-bottom:14px}
+h3{margin:0 0 10px;font-size:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;align-items:end}
+label{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--m)}
+input,select,textarea{font:inherit;padding:8px;border:1px solid var(--b);border-radius:6px;background:var(--bg);color:var(--t);width:100%}
+input[type=checkbox]{width:auto}label.ck{flex-direction:row;align-items:center;gap:6px;color:var(--t)}
+button{font:inherit;padding:8px 14px;border:0;border-radius:6px;background:var(--p);color:#fff;cursor:pointer}
+button.s{background:var(--bg);color:var(--t);border:1px solid var(--b);padding:4px 9px;font-size:13px;margin:2px}
+button.d{background:var(--r);color:#fff;border:0;padding:4px 9px;font-size:13px;margin:2px}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--b);white-space:nowrap}th{color:var(--m);font-weight:600}
+.tag{padding:2px 8px;border-radius:99px;font-size:12px;background:var(--b)}
+.tag.booked{background:#dbeafe;color:#1e40af}.tag.confirmed{background:#e0e7ff;color:#3730a3}.tag.checked_in{background:#fef3c7;color:#92400e}
+.tag.completed{background:#d1fae5;color:#065f46}.tag.cancelled,.tag.no_show,.tag.suspended,.tag.inactive{background:#fee2e2;color:#991b1b}.tag.active{background:#d1fae5;color:#065f46}
+.sum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.sum .tag{font-size:13px;padding:4px 10px}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);padding:10px 16px;border-radius:8px;background:#065f46;color:#fff;display:none;max-width:90vw;z-index:9}
+#toast.bad{background:var(--r)}
+.login{max-width:360px;margin:12vh auto}.mut{color:var(--m);font-size:13px}summary{cursor:pointer;font-weight:600}
+</style></head><body>
+<div id="app"></div><div id="toast"></div>
+<script>
+const B='/api/v1',$=s=>document.querySelector(s);
+const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let me=null,tab=null,fl={};
+const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
+async function api(p,m='GET',b){
+  const r=await fetch(B+p,{method:m,credentials:'same-origin',headers:b?{'Content-Type':'application/json'}:{},body:b?JSON.stringify(b):undefined});
+  if(r.status===204)return null;
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){if(r.status===401&&me&&p!=='/auth/login'){me=null;render()}
+    const d=j.detail;throw new Error(Array.isArray(d)?d.map(x=>x.msg).join('; '):d||'Error '+r.status)}
+  return j}
+function toast(m,bad){const t=$('#toast');t.textContent=m;t.className=bad?'bad':'';t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',3500)}
+const inp=(n,l,t='text',r=1,x='')=>`<label>${l}<input name="${n}" type="${t}" ${r?'required':''} ${x}></label>`;
+const opts=(a,v,l,ph)=>(ph?`<option value="">${ph}</option>`:'')+a.map(x=>`<option value="${E(x[v])}">${E(typeof l==='function'?l(x):x[l])}</option>`).join('');
+const table=(h,rows)=>`<div class="tw"><table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.join('')||`<tr><td colspan="${h.length}" class="mut">Nothing here yet</td></tr>`}</table></div>`;
+const tag=s=>`<span class="tag ${E(s)}">${E(s).replace('_',' ')}</span>`;
+const ROLE={super_admin:'Super admin',hospital_admin:'Hospital admin',receptionist:'Receptionist',doctor:'Doctor'};
+const TABS={super_admin:[['hospitals','Hospitals']],hospital_admin:[['appts','Appointments'],['patients','Patients'],['doctors','Doctors'],['staff','Staff'],['wa','WhatsApp']],
+  receptionist:[['appts','Appointments'],['patients','Patients']],doctor:[['appts','My appointments']]};
+
+function render(){
+  if(!me){$('#app').innerHTML=`<div class="card login"><h3>Hospital Appointments – Sign in</h3><form data-f="login" class="grid" style="grid-template-columns:1fr">${inp('email','Email','email')}${inp('password','Password','password')}<button>Sign in</button></form></div>`;return}
+  const t=TABS[me.role];if(!t.some(x=>x[0]===tab))tab=t[0][0];
+  $('#app').innerHTML=`<header><b>Hospital Appointments</b><span>${E(me.full_name)} · ${ROLE[me.role]}</span><button class="s" data-a="logout">Sign out</button></header>
+  <nav>${t.map(x=>`<button data-a="tab" data-t="${x[0]}" class="${x[0]===tab?'on':''}">${x[1]}</button>`).join('')}</nav><main id="main">Loading…</main>`;
+  load()}
+async function load(){try{$('#main').innerHTML=await V[tab]();after()}catch(e){$('#main').innerHTML=`<div class="card">${E(e.message)}</div>`}}
+
+const V={
+async hospitals(){const t=await api('/tenants');
+  return `<div class="card"><h3>Add hospital</h3><form data-f="newTenant" class="grid">${inp('name','Hospital name')}${inp('slug','Short name (a-z, 0-9, -)')}${inp('domain','Custom domain (optional)','text',0)}${inp('admin_name','Admin name')}${inp('admin_email','Admin email','email')}${inp('admin_password','Admin password (min 10)','password',1,'minlength=10')}<button>Create</button></form></div>
+  <div class="card"><h3>Hospitals</h3>${table(['ID','Name','Short name','Status',''],t.map(x=>`<tr><td>${x.id}</td><td>${E(x.name)}</td><td>${E(x.slug)}</td><td>${tag(x.status)}</td><td>${x.status==='active'?`<button class="d" data-a="tstat" data-id="${x.id}" data-s="suspended">Suspend</button>`:`<button class="s" data-a="tstat" data-id="${x.id}" data-s="active">Activate</button>`}</td></tr>`))}</div>`},
+
+async appts(){
+  const staff=me.role!=='doctor';fl.from??=today();fl.to??=today();fl.st??='';fl.doc??='';
+  const [docs,pts]=await Promise.all([api('/doctors'),staff?api('/patients?limit=20'):[]]);
+  const q=new URLSearchParams({date_from:fl.from,date_to:fl.to,limit:200});if(fl.st)q.set('status',fl.st);if(fl.doc&&staff)q.set('doctor_id',fl.doc);
+  const a=await api('/appointments?'+q);window._docs=docs;
+  const cnt={};a.forEach(x=>cnt[x.status]=(cnt[x.status]||0)+1);
+  const nxt={booked:['confirmed','checked_in','cancelled','no_show'],confirmed:['checked_in','cancelled','no_show'],checked_in:['completed','cancelled']};
+  const ok=s=>staff||['checked_in','completed','no_show'].includes(s);
+  const lab={confirmed:'Confirm',checked_in:'Check in',completed:'Complete',cancelled:'Cancel',no_show:'No show'};
+  return (staff?`<details class="card"><summary>+ Book appointment</summary><form data-f="book" class="grid" style="margin-top:10px">
+    <label>Find patient<input id="pq" placeholder="Name, mobile or ID"></label><label>Patient<select name="patient_id" id="psel" required>${opts(pts,'id',p=>`${p.full_name} (${p.patient_code}, ${p.mobile})`,'Select patient')}</select></label>
+    <label>Doctor<select name="doctor_id" id="dsel" required>${opts(docs,'id',d=>d.name+(d.specialization?' – '+d.specialization:''),'Select doctor')}</select></label>
+    <label>Date<input type="date" name="date" id="bdate" min="${today()}" required></label><label>Time slot<select name="time" id="slotsel" required><option value="">Pick doctor and date</option></select></label>
+    ${inp('reason','Reason (optional)','text',0)}<label class="ck"><input type="checkbox" name="send_whatsapp"> Patient agreed to WhatsApp messages</label><button>Book</button></form></details>`:'')+
+  `<div class="card"><form data-f="filter" class="grid"><label>From<input type="date" name="from" value="${fl.from}"></label><label>To<input type="date" name="to" value="${fl.to}"></label>
+   <label>Status<select name="st">${['','booked','confirmed','checked_in','completed','cancelled','no_show'].map(s=>`<option value="${s}" ${fl.st===s?'selected':''}>${s?s.replace('_',' '):'All'}</option>`).join('')}</select></label>
+   ${staff?`<label>Doctor<select name="doc"><option value="">All</option>${docs.map(d=>`<option value="${d.id}" ${String(d.id)===String(fl.doc)?'selected':''}>${E(d.name)}</option>`).join('')}</select></label>`:''}<button>Apply</button></form></div>
+  <div class="card"><div class="sum"><span class="tag">Total ${a.length}</span>${Object.entries(cnt).map(([k,v])=>`${tag(k).replace('</span>',': '+v+'</span>')}`).join('')}</div>
+  ${table(['No.','When','Patient','Doctor','Status','Fee','Actions'],a.map(x=>`<tr><td>${E(x.appointment_number)}</td><td>${E(x.start_local)}</td><td>${E(x.patient_name)}</td><td>${E(x.doctor_name)}</td><td>${tag(x.status)}</td><td>${x.fee??''}</td><td>${(nxt[x.status]||[]).filter(ok).map(s=>`<button class="${s==='cancelled'||s==='no_show'?'d':'s'}" data-a="astat" data-id="${x.id}" data-s="${s}">${lab[s]}</button>`).join('')}${staff&&['booked','confirmed'].includes(x.status)?`<button class="s" data-a="resch" data-id="${x.id}">Reschedule</button>`:''}</td></tr>`))}</div>`},
+
+async patients(){const p=await api('/patients?limit=50'+(fl.pq?'&q='+encodeURIComponent(fl.pq):''));
+  return `<div class="card"><h3>Register patient</h3><form data-f="newPatient" class="grid">${inp('full_name','Full name')}${inp('mobile','Mobile (10-digit or +code)')}${inp('email','Email (optional)','email',0)}
+  <label>Gender<select name="gender"><option value="">–</option><option>Male</option><option>Female</option><option>Other</option></select></label>${inp('date_of_birth','Date of birth','date',0)}<button>Save</button></form></div>
+  <div class="card"><form data-f="psearch" class="grid"><label>Search<input name="q" value="${E(fl.pq||'')}" placeholder="Name, mobile or ID"></label><button>Search</button></form>
+  ${table(['ID','Name','Mobile','Email','Gender','DOB'],p.map(x=>`<tr><td>${E(x.patient_code)}</td><td>${E(x.full_name)}</td><td>${E(x.mobile)}</td><td>${E(x.email)}</td><td>${E(x.gender)}</td><td>${E(x.date_of_birth)}</td></tr>`))}</div>`},
+
+async doctors(){const [d,dep,u]=await Promise.all([api('/doctors'),api('/departments'),api('/users')]);
+  const dn=Object.fromEntries(dep.map(x=>[x.id,x.name])),dl=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  return `<div class="card"><h3>Departments</h3><form data-f="newDept" class="grid">${inp('name','Name')}${inp('description','Description (optional)','text',0)}<button>Add</button></form><p class="mut">${dep.map(x=>E(x.name)).join(' · ')||'No departments yet'}</p></div>
+  <div class="card"><h3>Add doctor</h3><form data-f="newDoctor" class="grid">${inp('name','Doctor name')}<label>Department<select name="department_id">${opts(dep,'id','name','–')}</select></label>${inp('qualification','Qualification','text',0)}${inp('specialization','Specialization','text',0)}
+  ${inp('consultation_fee','Fee (₹)','number',0,'min=0 value=0')}${inp('slot_minutes','Slot (minutes)','number',1,'min=5 max=240 value=15')}${inp('start','Starts','time',1,'value=09:00')}${inp('end','Ends','time',1,'value=17:00')}
+  <label>Linked doctor login<select name="user_id">${opts(u.filter(x=>x.role==='doctor'),'id',x=>x.full_name+' ('+x.email+')','–')}</select></label>
+  <div>${dl.map((n,i)=>`<label class="ck"><input type="checkbox" name="days" value="${i}" ${i<5?'checked':''}>${n}</label>`).join('')}</div><button>Add doctor</button></form></div>
+  <div class="card"><h3>Doctors</h3>${table(['Name','Department','Specialization','Fee','Days','Hours','Slot',''],d.map(x=>`<tr><td>${E(x.name)}</td><td>${E(dn[x.department_id])}</td><td>${E(x.specialization)}</td><td>${x.consultation_fee}</td><td>${(x.availability.days||[]).map(i=>dl[i]).join(' ')}</td><td>${E(x.availability.start)}–${E(x.availability.end)}</td><td>${x.slot_minutes}m</td><td><button class="d" data-a="ddoc" data-id="${x.id}">Deactivate</button></td></tr>`))}</div>`},
+
+async wa(){const [c,m]=await Promise.all([api('/whatsapp/connection').catch(()=>null),api('/whatsapp/messages?limit=50')]);
+  const st=c?.status||'disconnected';
+  return `<div class="card"><h3>WhatsApp (QR login)</h3><p>Status: ${tag(st==='connected'?'active':'inactive').replace(/>.*</,'>'+E(st)+'<')} ${c?.display_phone?'· Number: +'+E(c.display_phone):''}</p>
+  <button data-a="waStart">${st==='connected'?'Reconnect / show QR':'Connect WhatsApp (scan QR)'}</button><div id="qrbox" style="margin-top:12px"></div>
+  <p class="mut">Open WhatsApp on the clinic phone, then Settings, Linked devices, Link a device, and scan the QR. To disconnect, remove the device from the phone. Unofficial method: use a dedicated number, message only patients who agreed, keep volume low.</p></div>
+  <div class="card"><h3>Message history</h3>${table(['ID','Type','To','Status','Tries','Error',''],m.map(x=>`<tr><td>${x.id}</td><td>${E(x.type)}</td><td>${E(x.recipient)}</td><td>${tag(x.status==='failed'?'cancelled':x.status==='sent'||x.status==='delivered'?'completed':'booked').replace(/>.*</,'>'+E(x.status)+'<')}</td><td>${x.attempts}</td><td>${E(x.error)}</td><td>${x.status==='failed'?`<button class="s" data-a="waRetry" data-id="${x.id}">Retry</button>`:''}</td></tr>`))}</div>`},
+
+async staff(){const u=await api('/users');
+  return `<div class="card"><h3>Add staff login</h3><form data-f="newUser" class="grid">${inp('full_name','Full name')}${inp('email','Email','email')}${inp('password','Password (min 10)','password',1,'minlength=10')}
+  <label>Role<select name="role"><option value="receptionist">Receptionist</option><option value="doctor">Doctor</option><option value="hospital_admin">Hospital admin</option></select></label><button>Create</button></form></div>
+  <div class="card"><h3>Staff</h3>${table(['Name','Email','Role'],u.map(x=>`<tr><td>${E(x.full_name)}</td><td>${E(x.email)}</td><td>${ROLE[x.role]||E(x.role)}</td></tr>`))}</div>`}
+};
+
+let pt;function after(){
+  const pq=$('#pq');if(pq)pq.oninput=()=>{clearTimeout(pt);pt=setTimeout(async()=>{try{const p=await api('/patients?limit=20&q='+encodeURIComponent(pq.value));$('#psel').innerHTML=opts(p,'id',x=>`${x.full_name} (${x.patient_code}, ${x.mobile})`,'Select patient')}catch(e){toast(e.message,1)}},300)};
+  const ds=$('#dsel'),bd=$('#bdate');if(ds)ds.onchange=bd.onchange=async()=>{const s=$('#slotsel');if(!ds.value||!bd.value)return;
+    try{const r=await api(`/appointments/slots?doctor_id=${ds.value}&date=${bd.value}`);s.innerHTML=r.slots.length?opts(r.slots.map(x=>({v:x})),'v','v','Select time'):'<option value="">No free slots</option>'}catch(e){toast(e.message,1)}}}
+
+const H={
+async login(o){me=await api('/auth/login','POST',o);tab=null;render()},
+async newTenant(o,f){await api('/tenants','POST',o);toast('Hospital created');load()},
+async filter(o){fl.from=o.from;fl.to=o.to;fl.st=o.st;fl.doc=o.doc||'';load()},
+async book(o,f){await api('/appointments','POST',{patient_id:+o.patient_id,doctor_id:+o.doctor_id,date:o.date,time:o.time,reason:o.reason,send_whatsapp:!!o.send_whatsapp});toast('Appointment booked');load()},
+async newPatient(o,f){const p=await api('/patients','POST',o);toast('Saved as '+p.patient_code);load()},
+async psearch(o){fl.pq=o.q||'';load()},
+async newDept(o){await api('/departments','POST',o);toast('Department added');load()},
+async newDoctor(o,f){const days=new FormData(f).getAll('days').map(Number);
+  const b={name:o.name,days,start:o.start,end:o.end,consultation_fee:+(o.consultation_fee||0),slot_minutes:+o.slot_minutes};
+  ['qualification','specialization'].forEach(k=>o[k]&&(b[k]=o[k]));if(o.department_id)b.department_id=+o.department_id;if(o.user_id)b.user_id=+o.user_id;
+  await api('/doctors','POST',b);toast('Doctor added');load()},
+async newUser(o){await api('/users','POST',o);toast('Login created');load()}
+};
+document.addEventListener('submit',async e=>{e.preventDefault();const f=e.target;
+  const o=Object.fromEntries([...new FormData(f)].filter(([,v])=>v!==''));
+  try{await H[f.dataset.f](o,f)}catch(x){toast(x.message,1)}});
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,id=b.dataset.id;
+  try{
+    if(a==='tab'){tab=b.dataset.t;render()}
+    else if(a==='logout'){await api('/auth/logout','POST');me=null;render()}
+    else if(a==='tstat'){await api(`/tenants/${id}/status`,'PATCH',{status:b.dataset.s});load()}
+    else if(a==='astat'){if(b.dataset.s==='cancelled'&&!confirm('Cancel this appointment?'))return;await api(`/appointments/${id}/status`,'POST',{status:b.dataset.s});toast('Updated');load()}
+    else if(a==='resch'){const d=prompt('New date (YYYY-MM-DD)');if(!d)return;const t=prompt('New time (HH:MM, 24-hour)');if(!t)return;
+      await api(`/appointments/${id}/reschedule`,'POST',{date:d,time:t});toast('Rescheduled');load()}
+    else if(a==='waStart'){let r=await api('/whatsapp/qr/start','POST');const box=$('#qrbox');
+      const paint=r=>{if(!$('#qrbox'))return true;if(r.bridge_status==='connected'){toast('WhatsApp connected');load();return true}
+        $('#qrbox').innerHTML=r.qr?`<img src="${E(r.qr)}" alt="QR code" width="260" height="260"><p class="mut">Scan within 20 seconds, it refreshes automatically.</p>`:'Preparing QR…';return false};
+      if(!paint(r)){const iv=setInterval(async()=>{try{if(paint(await api('/whatsapp/qr/status')))clearInterval(iv)}catch(e){clearInterval(iv);toast(e.message,1)}},3000)}}
+    else if(a==='waRetry'){await api(`/whatsapp/messages/${id}/retry`,'POST');toast('Retry queued');load()}
+    else if(a==='ddoc'){if(!confirm('Deactivate this doctor?'))return;await api(`/doctors/${id}/deactivate`,'POST');load()}
+  }catch(x){toast(x.message,1)}});
+api('/auth/me').then(u=>{me=u}).catch(()=>{}).finally(render);
+</script></body></html>
