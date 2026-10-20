@@ -75,7 +75,7 @@ async appts(){
   const ok=s=>staff||['checked_in','completed','no_show'].includes(s);
   const lab={confirmed:'Confirm',checked_in:'Check in',completed:'Complete',cancelled:'Cancel',no_show:'No show'};
   return (staff?`<details class="card"><summary>+ Book appointment</summary><form data-f="book" class="grid" style="margin-top:10px">
-    <label>Find patient<input id="pq" placeholder="Name, mobile or ID"></label><label>Patient<select name="patient_id" id="psel" required>${opts(pts,'id',p=>`${p.full_name} (${p.patient_code}, ${p.mobile})`,'Select patient')}</select></label>
+    <label>Find patient<input id="pq" placeholder="Type name, mobile or ID" autocomplete="off"><span id="pmsg" class="mut"></span></label><label>Patient<select name="patient_id" id="psel" required>${opts(pts,'id',p=>`${p.full_name} (${p.patient_code}, ${p.mobile})`,'Select patient')}</select></label>
     <label>Doctor<select name="doctor_id" id="dsel" required>${opts(docs,'id',d=>d.name+(d.specialization?' – '+d.specialization:''),'Select doctor')}</select></label>
     <label>Date<input type="date" name="date" id="bdate" min="${today()}" required></label><label>Time slot<select name="time" id="slotsel" required><option value="">Pick doctor and date</option></select></label>
     ${inp('reason','Reason (optional)','text',0)}<label class="ck"><input type="checkbox" name="send_whatsapp"> Patient agreed to WhatsApp messages</label><button>Book</button></form></details>`:'')+
@@ -114,7 +114,11 @@ async staff(){const u=await api('/users');
 };
 
 let pt;function after(){
-  const pq=$('#pq');if(pq)pq.oninput=()=>{clearTimeout(pt);pt=setTimeout(async()=>{try{const p=await api('/patients?limit=20&q='+encodeURIComponent(pq.value));$('#psel').innerHTML=opts(p,'id',x=>`${x.full_name} (${x.patient_code}, ${x.mobile})`,'Select patient')}catch(e){toast(e.message,1)}},300)};
+  const pq=$('#pq');if(pq){const run=()=>{clearTimeout(pt);pt=setTimeout(async()=>{const m=$('#pmsg');try{m.textContent='Searching…';
+      const p=await api('/patients?limit=20&q='+encodeURIComponent(pq.value.trim()));
+      $('#psel').innerHTML=opts(p,'id',x=>`${x.full_name} (${x.patient_code}, ${x.mobile})`,p.length===1?'':'Select patient');
+      m.textContent=p.length?p.length+' patient(s) found'+(p.length===1?' and selected':' - choose from the Patient list'):'No patient found. Register the patient in the Patients tab first.'}catch(e){m.textContent='';toast(e.message,1)}},300)};
+    pq.oninput=run;pq.onkeyup=run;pq.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();run()}}}
   const ds=$('#dsel'),bd=$('#bdate');if(ds)ds.onchange=bd.onchange=async()=>{const s=$('#slotsel');if(!ds.value||!bd.value)return;
     try{const r=await api(`/appointments/slots?doctor_id=${ds.value}&date=${bd.value}`);s.innerHTML=r.slots.length?opts(r.slots.map(x=>({v:x})),'v','v','Select time'):'<option value="">No free slots</option>'}catch(e){toast(e.message,1)}}}
 
